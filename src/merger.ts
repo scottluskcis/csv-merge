@@ -107,7 +107,7 @@ export async function mergeCsvFiles(
 
     result.success = true;
     console.log(
-      `Successfully merged ${result.totalRecords} records from ${result.totalFiles} files`
+      `✅ Successfully merged ${result.totalRecords} records from ${result.totalFiles} files`
     );
   } catch (error) {
     result.success = false;

@@ -20,8 +20,8 @@ async function main() {
     const outputPath = path.resolve(projectRoot, outputDir);
     const columnConfigPath = path.resolve(projectRoot, columnConfigFile);
 
-    console.log("CSV Merge Tool");
-    console.log("==============");
+    console.log("📊 CSV Merge Tool");
+    console.log("==================");
     console.log(`Input directory: ${inputPath}`);
     console.log(`Output directory: ${outputPath}`);
     console.log(`Column config: ${columnConfigPath}`);
@@ -35,7 +35,7 @@ async function main() {
       columnConfigPath
     );
 
-    console.log("CSV merge completed successfully!");
+    console.log("✅ CSV merge completed successfully!");
   } catch (error) {
     console.error(
       "Error:",
