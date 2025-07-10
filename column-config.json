@@ -28,5 +28,6 @@
     "Full_URL",
     "Migration_Issue",
     "Created"
-  ]
+  ],
+  "columnsToRemove": []
 }

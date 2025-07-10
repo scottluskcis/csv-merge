@@ -6,6 +6,8 @@ A TypeScript-based tool for merging multiple CSV files with different schemas in
 
 - **Enterprise Column Extraction**: Automatically extracts enterprise information from filenames and adds as the first column
 - **Configurable Column Ordering**: Uses a JSON configuration file to specify the exact order of columns in the output
+- **Column Removal**: Ability to completely remove specified columns from all input files
+- **Column Validation**: Warns about unexpected columns not defined in configuration
 - **Schema Flexibility**: Handles CSV files with different column sets - missing columns are filled with empty values
 - **Timestamp Output**: Automatically generates timestamped output filenames
 - **Error Handling**: Stops processing and reports errors if any file fails to process
@@ -42,7 +44,7 @@ COLUMN_CONFIG_FILE=column-config.json
 
 ### Column Configuration (column-config.json)
 
-Define the exact order of columns in the output file:
+Define the exact order of columns in the output file and optionally specify columns to remove:
 
 ```json
 {
@@ -75,8 +77,41 @@ Define the exact order of columns in the output file:
     "Full_URL",
     "Migration_Issue",
     "Created"
-  ]
+  ],
+  "columnsToRemove": []
 }
+```
+
+#### Configuration Options
+
+- **columns**: Array of column names in the desired output order
+- **columnsToRemove** (optional): Array of column names to completely remove from all input files
+
+#### Column Validation and Warnings
+
+The tool will generate warnings for any columns found in input files that are:
+
+- Not listed in the `columns` array
+- Not listed in the `columnsToRemove` array
+
+Example warning output:
+
+```
+⚠️  File "example.csv" contains unexpected columns not in configuration: [Security_Enabled, License_Type]
+```
+
+#### Column Removal
+
+When columns are specified in `columnsToRemove`:
+
+- They are completely filtered out from all input files
+- They will not appear in the final output CSV
+- The tool logs which columns were removed from each file
+
+Example removal output:
+
+```
+🗑️  Removed columns from "example.csv": [Migration_Issue, Full_URL]
 ```
 
 ## File Naming Convention
@@ -140,6 +175,32 @@ The tool will stop processing and exit with an error if:
 - Any CSV file is malformed or unreadable
 - Unknown enterprise prefix in filename
 - Column configuration file is missing or invalid
+
+**Note**: The tool will continue processing if it encounters unexpected columns (not in the configuration), but will display warnings for these columns.
+
+## Summary Output
+
+After successful processing, the tool displays a summary including:
+
+- Files processed count
+- Total records merged
+- Output file path
+- Number of columns in output
+- Number of warnings (for unexpected columns)
+- Number of columns removed (if any)
+
+Example summary:
+
+```
+=== CSV Merge Summary ===
+Files processed: 3
+Total records: 7
+Output file: output/merged_data_20250709_195703.csv
+Columns: 29
+Warnings: 2
+Columns removed: 2
+=========================
+```
 
 ## Example Output
 

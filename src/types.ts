@@ -8,6 +8,7 @@ export interface MergedRecord extends CsvRecord {
 
 export interface ColumnConfig {
   columns: string[];
+  columnsToRemove?: string[];
 }
 
 export interface EnterpriseMapping {

@@ -6,9 +6,82 @@ import {
   ColumnConfig,
   ProcessingResult,
 } from "./types";
-import { readCsvFile } from "./csv-reader";
+import { readCsvFile, getCsvHeaders } from "./csv-reader";
 import { writeCsvFile } from "./csv-writer";
 import { extractEnterprise, getCsvFiles, generateTimestamp } from "./utils";
+
+/**
+ * Validate columns against configuration and generate warnings
+ * @param filePath - Path to the CSV file being processed
+ * @param headers - Column headers from the CSV file
+ * @param columnConfig - Column configuration
+ * @returns Object with filtered headers and any warnings
+ */
+function validateAndFilterColumns(
+  filePath: string,
+  headers: string[],
+  columnConfig: ColumnConfig
+): { filteredHeaders: string[]; warnings: string[] } {
+  const warnings: string[] = [];
+  const configuredColumns = new Set(columnConfig.columns);
+  const columnsToRemove = new Set(columnConfig.columnsToRemove || []);
+
+  // Check for unexpected columns (not in config and not marked for removal)
+  const unexpectedColumns = headers.filter(
+    (header) => !configuredColumns.has(header) && !columnsToRemove.has(header)
+  );
+
+  if (unexpectedColumns.length > 0) {
+    const warningMsg = `⚠️  File "${path.basename(
+      filePath
+    )}" contains unexpected columns not in configuration: [${unexpectedColumns.join(
+      ", "
+    )}]`;
+    warnings.push(warningMsg);
+    console.warn(warningMsg);
+  }
+
+  // Filter out columns marked for removal
+  const filteredHeaders = headers.filter(
+    (header) => !columnsToRemove.has(header)
+  );
+
+  if (columnsToRemove.size > 0) {
+    const removedColumns = headers.filter((header) =>
+      columnsToRemove.has(header)
+    );
+    if (removedColumns.length > 0) {
+      console.log(
+        `🗑️  Removed columns from "${path.basename(
+          filePath
+        )}": [${removedColumns.join(", ")}]`
+      );
+    }
+  }
+
+  return { filteredHeaders, warnings };
+}
+
+/**
+ * Filter record to remove specified columns
+ * @param record - Original CSV record
+ * @param columnsToRemove - Set of column names to remove
+ * @returns Filtered record without removed columns
+ */
+function filterRecord(
+  record: CsvRecord,
+  columnsToRemove: Set<string>
+): CsvRecord {
+  const filteredRecord: CsvRecord = {};
+
+  for (const [key, value] of Object.entries(record)) {
+    if (!columnsToRemove.has(key)) {
+      filteredRecord[key] = value;
+    }
+  }
+
+  return filteredRecord;
+}
 
 /**
  * Load column configuration from JSON file
@@ -32,9 +105,20 @@ export function loadColumnConfig(configPath: string): ColumnConfig {
       );
     }
 
+    // Validate columnsToRemove if present
+    if (config.columnsToRemove && !Array.isArray(config.columnsToRemove)) {
+      throw new Error(
+        'Invalid column configuration: "columnsToRemove" must be an array if specified'
+      );
+    }
+
+    const removeCount = config.columnsToRemove?.length || 0;
     console.log(
-      `Loaded column configuration with ${config.columns.length} columns`
+      `Loaded column configuration with ${config.columns.length} columns${
+        removeCount > 0 ? ` and ${removeCount} columns to remove` : ""
+      }`
     );
+
     return config;
   } catch (error) {
     throw new Error(
@@ -70,6 +154,8 @@ export async function mergeCsvFiles(
 
     console.log(`Found ${csvFiles.length} CSV files to process`);
 
+    const columnsToRemove = new Set(columnConfig.columnsToRemove || []);
+
     // Process each file
     for (const filePath of csvFiles) {
       try {
@@ -78,14 +164,28 @@ export async function mergeCsvFiles(
         // Extract enterprise from filename
         const enterprise = extractEnterprise(path.basename(filePath));
 
+        // Get headers first to validate columns
+        const headers = await getCsvHeaders(filePath);
+        const { filteredHeaders, warnings } = validateAndFilterColumns(
+          filePath,
+          headers,
+          columnConfig
+        );
+
+        // Add any warnings to the result
+        result.errors.push(...warnings);
+
         // Read CSV records
         const records = await readCsvFile(filePath);
 
-        // Transform records to include enterprise column
-        const transformedRecords: MergedRecord[] = records.map((record) => ({
-          Enterprise: enterprise,
-          ...record,
-        }));
+        // Filter records to remove specified columns and transform to include enterprise
+        const transformedRecords: MergedRecord[] = records.map((record) => {
+          const filteredRecord = filterRecord(record, columnsToRemove);
+          return {
+            Enterprise: enterprise,
+            ...filteredRecord,
+          };
+        });
 
         result.records.push(...transformedRecords);
         result.totalRecords += records.length;
@@ -177,6 +277,14 @@ export async function processCsvMerge(
       throw new Error(`Merge failed: ${result.errors.join(", ")}`);
     }
 
+    // Count warnings (non-error messages)
+    const warnings = result.errors.filter((error) => error.includes("⚠️"));
+    const actualErrors = result.errors.filter((error) => !error.includes("⚠️"));
+
+    if (actualErrors.length > 0) {
+      throw new Error(`Merge failed: ${actualErrors.join(", ")}`);
+    }
+
     // Order records according to configuration
     const orderedRecords = orderRecords(result.records, columnConfig);
 
@@ -198,6 +306,15 @@ export async function processCsvMerge(
     console.log(`Total records: ${result.totalRecords}`);
     console.log(`Output file: ${outputPath}`);
     console.log(`Columns: ${orderedColumns.length}`);
+    if (warnings.length > 0) {
+      console.log(`Warnings: ${warnings.length}`);
+    }
+    if (
+      columnConfig.columnsToRemove &&
+      columnConfig.columnsToRemove.length > 0
+    ) {
+      console.log(`Columns removed: ${columnConfig.columnsToRemove.length}`);
+    }
     console.log("=========================\n");
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : "Unknown error";
