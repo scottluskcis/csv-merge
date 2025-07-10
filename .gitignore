@@ -5,3 +5,6 @@ dist/
 
 input/
 output/
+
+inputs/customer/
+output/customer/
