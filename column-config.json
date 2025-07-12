@@ -20,7 +20,7 @@
     "repository-code-scanning-default-setup",
     "repository-dependabot-alerts",
     "repository-packages",
-    "repository-releases-gt-5gb",
+    "repository-releases",
     "repository-disk-usage",
     "repository-deployments",
     "repository-environments",
@@ -62,5 +62,6 @@
     "Full_URL",
     "Migration_Issue",
     "Created"
-  ]
+  ],
+  "duplicateCheckColumns": ["Repo_Name"]
 }

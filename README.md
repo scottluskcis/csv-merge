@@ -7,6 +7,7 @@ A TypeScript-based tool for merging multiple CSV files with different schemas in
 - **Enterprise Column Extraction**: Automatically extracts enterprise information from filenames and adds as the first column
 - **Configurable Column Ordering**: Uses a JSON configuration file to specify the exact order of columns in the output
 - **Column Removal**: Ability to completely remove specified columns from all input files
+- **Duplicate Detection**: Post-merge duplicate checking for specified columns with detailed reporting
 - **Column Validation**: Warns about unexpected columns not defined in configuration
 - **Schema Flexibility**: Handles CSV files with different column sets - missing columns are filled with empty values
 - **Timestamp Output**: Automatically generates timestamped output filenames
@@ -78,7 +79,8 @@ Define the exact order of columns in the output file and optionally specify colu
     "Migration_Issue",
     "Created"
   ],
-  "columnsToRemove": []
+  "columnsToRemove": [],
+  "duplicateCheckColumns": ["Repo_Name"]
 }
 ```
 
@@ -86,6 +88,7 @@ Define the exact order of columns in the output file and optionally specify colu
 
 - **columns**: Array of column names in the desired output order
 - **columnsToRemove** (optional): Array of column names to completely remove from all input files
+- **duplicateCheckColumns** (optional): Array of column names to check for duplicate values after merging
 
 #### Column Validation and Warnings
 
@@ -112,6 +115,43 @@ Example removal output:
 
 ```
 🗑️  Removed columns from "example.csv": [Migration_Issue, Full_URL]
+```
+
+#### Duplicate Detection
+
+When columns are specified in `duplicateCheckColumns`, the tool will:
+
+- Check for duplicate values in those columns after the merge is complete
+- Skip empty/blank values in the duplicate analysis
+- Display detailed results showing:
+  - Which values are duplicated
+  - How many times each value appears
+  - The row numbers where duplicates occur
+- Provide a summary of total duplicates found
+
+Example duplicate check output:
+
+```
+🔍 Duplicate Check Results
+===========================
+❌ Column "Repo_Name": 3 duplicate value(s) found
+  1. "migrations" appears 2 times (rows: 6, 6426)
+  2. "ansible-collection-core" appears 2 times (rows: 8, 58)
+  3. "scratchpad" appears 3 times (rows: 169, 7971, 8234)
+
+📊 Summary: 3 duplicate value(s) found across all checked columns
+===========================
+```
+
+When no duplicates are found:
+
+```
+🔍 Duplicate Check Results
+===========================
+✅ Column "Repo_Name": No duplicates found
+
+📊 Summary: No duplicates found in any checked columns
+===========================
 ```
 
 ## File Naming Convention

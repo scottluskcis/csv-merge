@@ -5,6 +5,7 @@ import {
   MergedRecord,
   ColumnConfig,
   ProcessingResult,
+  DuplicateCheckResult,
 } from "./types";
 import { readCsvFile, getCsvHeaders } from "./csv-reader";
 import { writeCsvFile } from "./csv-writer";
@@ -112,10 +113,25 @@ export function loadColumnConfig(configPath: string): ColumnConfig {
       );
     }
 
+    // Validate duplicateCheckColumns if present
+    if (
+      config.duplicateCheckColumns &&
+      !Array.isArray(config.duplicateCheckColumns)
+    ) {
+      throw new Error(
+        'Invalid column configuration: "duplicateCheckColumns" must be an array if specified'
+      );
+    }
+
     const removeCount = config.columnsToRemove?.length || 0;
+    const duplicateCheckCount = config.duplicateCheckColumns?.length || 0;
     console.log(
       `Loaded column configuration with ${config.columns.length} columns${
-        removeCount > 0 ? ` and ${removeCount} columns to remove` : ""
+        removeCount > 0 ? `, ${removeCount} columns to remove` : ""
+      }${
+        duplicateCheckCount > 0
+          ? `, ${duplicateCheckCount} columns to check for duplicates`
+          : ""
       }`
     );
 
@@ -127,6 +143,121 @@ export function loadColumnConfig(configPath: string): ColumnConfig {
       }`
     );
   }
+}
+
+/**
+ * Check for duplicate values in specified columns
+ * @param records - Array of merged records to check
+ * @param columnsToCheck - Array of column names to check for duplicates
+ * @returns Array of duplicate check results
+ */
+export function checkForDuplicates(
+  records: MergedRecord[],
+  columnsToCheck: string[]
+): DuplicateCheckResult[] {
+  const results: DuplicateCheckResult[] = [];
+
+  for (const column of columnsToCheck) {
+    // Check if the column exists in the records
+    const columnExists = records.length > 0 && column in records[0];
+    if (!columnExists) {
+      console.warn(
+        `⚠️  Column "${column}" not found in merged data - skipping duplicate check`
+      );
+      continue;
+    }
+
+    // Track value occurrences with row numbers
+    const valueMap = new Map<string, { count: number; rowNumbers: number[] }>();
+
+    records.forEach((record, index) => {
+      const value = record[column] || "";
+      // Skip empty values in duplicate check
+      if (value.trim() === "") {
+        return;
+      }
+
+      const rowNumber = index + 2; // +2 because: +1 for 1-based indexing, +1 for header row
+
+      if (valueMap.has(value)) {
+        const existing = valueMap.get(value)!;
+        existing.count++;
+        existing.rowNumbers.push(rowNumber);
+      } else {
+        valueMap.set(value, { count: 1, rowNumbers: [rowNumber] });
+      }
+    });
+
+    // Find duplicates (values that appear more than once)
+    const duplicateValues = Array.from(valueMap.entries())
+      .filter(([_, data]) => data.count > 1)
+      .map(([value, data]) => ({
+        value,
+        count: data.count,
+        rowNumbers: data.rowNumbers,
+      }))
+      .sort((a, b) => b.count - a.count); // Sort by count descending
+
+    results.push({
+      column,
+      duplicateValues,
+    });
+  }
+
+  return results;
+}
+
+/**
+ * Display duplicate check results
+ * @param duplicateResults - Array of duplicate check results
+ */
+export function displayDuplicateResults(
+  duplicateResults: DuplicateCheckResult[]
+): void {
+  if (duplicateResults.length === 0) {
+    return;
+  }
+
+  let totalDuplicatesFound = 0;
+
+  console.log("\n🔍 Duplicate Check Results");
+  console.log("===========================");
+
+  for (const result of duplicateResults) {
+    if (result.duplicateValues.length === 0) {
+      console.log(`✅ Column "${result.column}": No duplicates found`);
+    } else {
+      console.log(
+        `❌ Column "${result.column}": ${result.duplicateValues.length} duplicate value(s) found`
+      );
+      totalDuplicatesFound += result.duplicateValues.length;
+
+      result.duplicateValues.forEach((duplicate, index) => {
+        const rowList =
+          duplicate.rowNumbers.length > 5
+            ? `${duplicate.rowNumbers.slice(0, 5).join(", ")} ... (${
+                duplicate.rowNumbers.length - 5
+              } more)`
+            : duplicate.rowNumbers.join(", ");
+
+        console.log(
+          `  ${index + 1}. "${duplicate.value}" appears ${
+            duplicate.count
+          } times (rows: ${rowList})`
+        );
+      });
+    }
+    console.log("");
+  }
+
+  if (totalDuplicatesFound > 0) {
+    console.log(
+      `📊 Summary: ${totalDuplicatesFound} duplicate value(s) found across all checked columns`
+    );
+  } else {
+    console.log("📊 Summary: No duplicates found in any checked columns");
+  }
+  console.log("===========================\n");
 }
 
 /**
@@ -301,6 +432,18 @@ export async function processCsvMerge(
     // Write merged data to output file
     await writeCsvFile(orderedRecords, outputPath, orderedColumns);
 
+    // Perform duplicate checks if configured
+    if (
+      columnConfig.duplicateCheckColumns &&
+      columnConfig.duplicateCheckColumns.length > 0
+    ) {
+      const duplicateResults = checkForDuplicates(
+        orderedRecords,
+        columnConfig.duplicateCheckColumns
+      );
+      displayDuplicateResults(duplicateResults);
+    }
+
     console.log("\n=== CSV Merge Summary ===");
     console.log(`Files processed: ${result.totalFiles}`);
     console.log(`Total records: ${result.totalRecords}`);
@@ -314,6 +457,14 @@ export async function processCsvMerge(
       columnConfig.columnsToRemove.length > 0
     ) {
       console.log(`Columns removed: ${columnConfig.columnsToRemove.length}`);
+    }
+    if (
+      columnConfig.duplicateCheckColumns &&
+      columnConfig.duplicateCheckColumns.length > 0
+    ) {
+      console.log(
+        `Duplicate checks performed: ${columnConfig.duplicateCheckColumns.length} columns`
+      );
     }
     console.log("=========================\n");
   } catch (error) {
