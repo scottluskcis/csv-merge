@@ -1,5 +1,0 @@
-Org,Repository,Username,Email,Reason,Activity Type,Access,Access Type,Team,Cohort
-github,repo1,alice,alice@company.com,Developer,Code Review,Admin,Direct,team-alpha,2024-Q1
-github,repo2,bob,bob@company.com,Maintainer,Issues,Write,Direct,team-beta,2024-Q1
-github,repo3,charlie,charlie@company.com,Contributor,Pull Request,Read,Direct,team-gamma,2024-Q2
-github,repo1,david,david@company.com,Developer,Code Review,Admin,Team,team-alpha,2024-Q2
