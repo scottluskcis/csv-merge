@@ -5,6 +5,7 @@ import {
   MergedRecord,
   ColumnConfig,
   ProcessingResult,
+  JoinConfig,
 } from "./types";
 import { readCsvFile, getCsvHeaders } from "./csv-reader";
 import { writeCsvFile } from "./csv-writer";
@@ -112,11 +113,21 @@ export function loadColumnConfig(configPath: string): ColumnConfig {
       );
     }
 
+    // Validate joinConfig if present
+    if (config.joinConfig) {
+      if (!config.joinConfig.joinKey || !config.joinConfig.newColumn) {
+        throw new Error(
+          'Invalid join configuration: "joinKey" and "newColumn" are required when joinConfig is specified'
+        );
+      }
+    }
+
     const removeCount = config.columnsToRemove?.length || 0;
+    const joinInfo = config.joinConfig ? ` with join on "${config.joinConfig.joinKey}"` : "";
     console.log(
       `Loaded column configuration with ${config.columns.length} columns${
         removeCount > 0 ? ` and ${removeCount} columns to remove` : ""
-      }`
+      }${joinInfo}`
     );
 
     return config;
@@ -224,6 +235,112 @@ export async function mergeCsvFiles(
 }
 
 /**
+ * Join two CSV files with lookup functionality
+ * @param inputDir - Directory containing CSV files
+ * @param columnConfig - Column configuration with join settings
+ * @returns Processing result with joined records
+ */
+export async function joinCsvFiles(
+  inputDir: string,
+  columnConfig: ColumnConfig
+): Promise<ProcessingResult> {
+  const result: ProcessingResult = {
+    success: false,
+    records: [],
+    totalFiles: 0,
+    totalRecords: 0,
+    errors: [],
+  };
+
+  try {
+    if (!columnConfig.joinConfig) {
+      throw new Error("Join configuration is required for join operation");
+    }
+
+    // Get all CSV files
+    const csvFiles = getCsvFiles(inputDir);
+    result.totalFiles = csvFiles.length;
+
+    if (csvFiles.length !== 2) {
+      throw new Error(`Join operation requires exactly 2 CSV files, found ${csvFiles.length}`);
+    }
+
+    console.log(`Found ${csvFiles.length} CSV files for join operation`);
+
+    // Sort files to ensure consistent ordering: primary file should be the one with more columns (FILE 1)
+    // The teams file should be the smaller lookup file (FILE 2)
+    const file1Headers = await getCsvHeaders(csvFiles[0]);
+    const file2Headers = await getCsvHeaders(csvFiles[1]);
+    
+    let primaryFilePath: string;
+    let lookupFilePath: string;
+    
+    // Determine which file is the primary based on column count (FILE 1 has more columns)
+    if (file1Headers.length >= file2Headers.length) {
+      primaryFilePath = csvFiles[0];
+      lookupFilePath = csvFiles[1];
+    } else {
+      primaryFilePath = csvFiles[1];
+      lookupFilePath = csvFiles[0];
+    }
+
+    const { joinKey, newColumn } = columnConfig.joinConfig;
+
+    console.log(`Processing primary file: ${path.basename(primaryFilePath)}`);
+    console.log(`Processing lookup file: ${path.basename(lookupFilePath)}`);
+
+    // Read both files
+    const primaryRecords = await readCsvFile(primaryFilePath);
+    const lookupRecords = await readCsvFile(lookupFilePath);
+
+    // Extract enterprise from primary filename
+    const enterprise = extractEnterprise(path.basename(primaryFilePath));
+
+    // Create lookup set from the second file for fast matching
+    const lookupSet = new Set<string>();
+    lookupRecords.forEach((record) => {
+      const lookupValue = record[joinKey];
+      if (lookupValue) {
+        lookupSet.add(lookupValue);
+      }
+    });
+
+    console.log(`Created lookup set with ${lookupSet.size} unique ${joinKey} values`);
+
+    // Process primary records and add the new column
+    const joinedRecords: MergedRecord[] = primaryRecords.map((record) => {
+      const lookupValue = record[joinKey];
+      const isMatch = lookupValue && lookupSet.has(lookupValue);
+      
+      return {
+        Enterprise: enterprise,
+        ...record,
+        [newColumn]: isMatch ? "TRUE" : "FALSE",
+      };
+    });
+
+    result.records = joinedRecords;
+    result.totalRecords = joinedRecords.length;
+    result.success = true;
+
+    console.log(
+      `✅ Successfully joined ${result.totalRecords} records with ${lookupSet.size} lookup values`
+    );
+  } catch (error) {
+    result.success = false;
+    const errorMsg =
+      error instanceof Error
+        ? error.message
+        : "Unknown error during join process";
+    if (!result.errors.includes(errorMsg)) {
+      result.errors.push(errorMsg);
+    }
+  }
+
+  return result;
+}
+
+/**
  * Order records according to column configuration
  * @param records - Merged records
  * @param columnConfig - Column configuration
@@ -270,11 +387,19 @@ export async function processCsvMerge(
     // Load column configuration
     const columnConfig = loadColumnConfig(columnConfigPath);
 
-    // Merge CSV files
-    const result = await mergeCsvFiles(inputDir, columnConfig);
+    let result: ProcessingResult;
+
+    // Check if this is a join operation or traditional merge
+    if (columnConfig.joinConfig) {
+      console.log("Detected join configuration - performing join operation");
+      result = await joinCsvFiles(inputDir, columnConfig);
+    } else {
+      console.log("Performing traditional merge operation");
+      result = await mergeCsvFiles(inputDir, columnConfig);
+    }
 
     if (!result.success) {
-      throw new Error(`Merge failed: ${result.errors.join(", ")}`);
+      throw new Error(`${columnConfig.joinConfig ? 'Join' : 'Merge'} failed: ${result.errors.join(", ")}`);
     }
 
     // Count warnings (non-error messages)
@@ -282,7 +407,7 @@ export async function processCsvMerge(
     const actualErrors = result.errors.filter((error) => !error.includes("⚠️"));
 
     if (actualErrors.length > 0) {
-      throw new Error(`Merge failed: ${actualErrors.join(", ")}`);
+      throw new Error(`${columnConfig.joinConfig ? 'Join' : 'Merge'} failed: ${actualErrors.join(", ")}`);
     }
 
     // Order records according to configuration
@@ -301,11 +426,15 @@ export async function processCsvMerge(
     // Write merged data to output file
     await writeCsvFile(orderedRecords, outputPath, orderedColumns);
 
-    console.log("\n=== CSV Merge Summary ===");
+    console.log(`\n=== CSV ${columnConfig.joinConfig ? 'Join' : 'Merge'} Summary ===`);
     console.log(`Files processed: ${result.totalFiles}`);
     console.log(`Total records: ${result.totalRecords}`);
     console.log(`Output file: ${outputPath}`);
     console.log(`Columns: ${orderedColumns.length}`);
+    if (columnConfig.joinConfig) {
+      console.log(`Join key: ${columnConfig.joinConfig.joinKey}`);
+      console.log(`New column: ${columnConfig.joinConfig.newColumn}`);
+    }
     if (warnings.length > 0) {
       console.log(`Warnings: ${warnings.length}`);
     }
@@ -318,7 +447,7 @@ export async function processCsvMerge(
     console.log("=========================\n");
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : "Unknown error";
-    console.error(`CSV merge failed: ${errorMsg}`);
+    console.error(`CSV operation failed: ${errorMsg}`);
     throw error;
   }
 }
