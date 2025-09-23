@@ -1,0 +1,19 @@
+{
+  "columns": [
+    "Org",
+    "Repository", 
+    "Username",
+    "Email",
+    "Reason",
+    "Activity Type",
+    "Access",
+    "Access Type",
+    "Team",
+    "Cohort",
+    "IS_COPILOT_USER"
+  ],
+  "joinConfig": {
+    "joinKey": "Username",
+    "newColumn": "IS_COPILOT_USER"
+  }
+}
